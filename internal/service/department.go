@@ -14,6 +14,7 @@ type DepartmentRepository interface {
 
 	GetAll(ctx context.Context) ([]model.Department, error)
 	GetAllWithEmployees(ctx context.Context) ([]model.Department, error)
+	ReassignEmployees(ctx context.Context, fromDeptID, toDeptID uint) error
 }
 
 type DepartmentService struct {
@@ -44,6 +45,53 @@ func (s *DepartmentService) Create(ctx context.Context, name string, parentID *u
 	return dept, nil
 }
 
+func (s *DepartmentService) GetByID(ctx context.Context, id uint, depth int, withEmployees bool) (*model.Department, error) {
+	var allDepts []model.Department
+	var err error
+
+	if withEmployees {
+		allDepts, err = s.repo.GetAllWithEmployees(ctx)
+	} else {
+		allDepts, err = s.repo.GetAll(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	idToDept := make(map[uint]*model.Department)
+	for i := range allDepts {
+		allDepts[i].Children = make([]model.Department, 0)
+		if allDepts[i].Employees == nil {
+			allDepts[i].Employees = make([]model.Employee, 0)
+		}
+		idToDept[allDepts[i].ID] = &allDepts[i]
+	}
+
+	dept, exists := idToDept[id]
+	if !exists {
+		return nil, ErrDepartmentNotFound
+	}
+
+	result := buildSubtree(dept, idToDept, depth)
+	return &result, nil
+}
+
+func buildSubtree(dept *model.Department, idToDept map[uint]*model.Department, depth int) model.Department {
+	node := *dept
+	node.Children = make([]model.Department, 0)
+
+	if depth <= 0 {
+		return node
+	}
+
+	for _, candidate := range idToDept {
+		if candidate.ParentID != nil && *candidate.ParentID == node.ID {
+			child := buildSubtree(candidate, idToDept, depth-1)
+			node.Children = append(node.Children, child)
+		}
+	}
+	return node
+}
 func (s *DepartmentService) Update(ctx context.Context, id uint, newName string, newParentID *uint) (*model.Department, error) {
 	dept, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -102,7 +150,7 @@ func (s *DepartmentService) checkCycle(ctx context.Context, currentID uint, targ
 	return false, nil
 }
 
-func (s *DepartmentService) Delete(ctx context.Context, id uint) error {
+func (s *DepartmentService) Delete(ctx context.Context, id uint, mode string, reassignTo *uint) error {
 	dept, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -110,7 +158,30 @@ func (s *DepartmentService) Delete(ctx context.Context, id uint) error {
 	if dept == nil {
 		return ErrDepartmentNotFound
 	}
-	return s.repo.Delete(ctx, id)
+
+	switch mode {
+	case "cascade":
+		return s.repo.Delete(ctx, id)
+
+	case "reassign":
+		if reassignTo == nil {
+			return ErrInvalidDeleteMode
+		}
+		target, err := s.repo.GetByID(ctx, *reassignTo)
+		if err != nil {
+			return err
+		}
+		if target == nil {
+			return ErrReassignTargetNotFound
+		}
+		if err := s.repo.ReassignEmployees(ctx, id, *reassignTo); err != nil {
+			return err
+		}
+		return s.repo.Delete(ctx, id)
+
+	default:
+		return ErrInvalidDeleteMode
+	}
 }
 
 func (s *DepartmentService) GetTree(ctx context.Context, withEmployees bool) ([]model.Department, error) {
@@ -143,15 +214,15 @@ func (s *DepartmentService) GetTree(ctx context.Context, withEmployees bool) ([]
 		if dept.ParentID != nil {
 			parent, exists := idToDept[*dept.ParentID]
 			if exists {
-				parent.Children = append(parent.Children, *dept)
+				parent.Children = append(parent.Children, allDepts[i])
 			}
 		}
 	}
 
 	var finalTree []model.Department
-	for i := range allDepts {
-		if allDepts[i].ParentID == nil {
-			finalTree = append(finalTree, *idToDept[allDepts[i].ID])
+	for _, dept := range idToDept {
+		if dept.ParentID == nil {
+			finalTree = append(finalTree, *dept)
 		}
 	}
 

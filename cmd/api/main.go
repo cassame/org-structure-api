@@ -37,12 +37,15 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/departments", deptHandler.CreateDepartment)
-	mux.HandleFunc("GET /api/departments", deptHandler.GetTree)
-	mux.HandleFunc("PUT /api/departments/{id}", deptHandler.UpdateDepartment)
-	mux.HandleFunc("DELETE /api/departments/{id}", deptHandler.DeleteDepartment)
-
-	// Роут для сотрудников (empHandler)
+	mux.HandleFunc("POST /api/departments/{id}/employees", empHandler.CreateEmployeeInDepartment)
 	mux.HandleFunc("POST /api/employees", empHandler.CreateEmployee)
+
+	mux.HandleFunc("GET /api/departments", deptHandler.GetTree)
+	mux.HandleFunc("GET /api/departments/{id}", deptHandler.GetDepartmentByID)
+
+	mux.HandleFunc("PATCH /api/departments/{id}", deptHandler.UpdateDepartment)
+	
+	mux.HandleFunc("DELETE /api/departments/{id}", deptHandler.DeleteDepartment)
 
 	log.Printf("Starting server on port %s...", cfg.Port)
 	loggedMux := handler.LoggerMiddleware(mux)

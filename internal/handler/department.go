@@ -38,10 +38,12 @@ func (h *DepartmentHandler) CreateDepartment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if strings.TrimSpace(input.Name) == "" {
-		respondWithError(w, http.StatusBadRequest, "Name is required")
+	name, err := validateName(input.Name)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	input.Name = name
 
 	dept, err := h.service.Create(r.Context(), input.Name, input.ParentID)
 	if err != nil {
@@ -87,10 +89,12 @@ func (h *DepartmentHandler) UpdateDepartment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if strings.TrimSpace(input.Name) == "" {
-		respondWithError(w, http.StatusBadRequest, "Name cannot be empty")
+	name, err := validateName(input.Name)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	input.Name = name
 
 	dept, err := h.service.Update(r.Context(), id, input.Name, input.ParentID)
 	if err != nil {
@@ -110,7 +114,6 @@ func (h *DepartmentHandler) UpdateDepartment(w http.ResponseWriter, r *http.Requ
 
 func (h *DepartmentHandler) DeleteDepartment(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-
 	id64, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "invalid department ID")
@@ -118,7 +121,62 @@ func (h *DepartmentHandler) DeleteDepartment(w http.ResponseWriter, r *http.Requ
 	}
 	id := uint(id64)
 
-	err = h.service.Delete(r.Context(), id)
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "cascade"
+	}
+
+	var reassignTo *uint
+	if r.URL.Query().Get("reassign_to_department_id") != "" {
+		val, err := strconv.ParseUint(r.URL.Query().Get("reassign_to_department_id"), 10, 32)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "invalid reassign_to_department_id")
+			return
+		}
+		u := uint(val)
+		reassignTo = &u
+	}
+
+	err = h.service.Delete(r.Context(), id, mode, reassignTo)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrDepartmentNotFound):
+			respondWithError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrReassignTargetNotFound):
+			respondWithError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrInvalidDeleteMode):
+			respondWithError(w, http.StatusBadRequest, err.Error())
+		default:
+			respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+
+}
+
+func (h *DepartmentHandler) GetDepartmentByID(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id64, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid department ID")
+		return
+	}
+
+	depth := 1
+	if d := r.URL.Query().Get("depth"); d != "" {
+		parsed, err := strconv.Atoi(d)
+		if err != nil || parsed < 1 || parsed > 5 {
+			respondWithError(w, http.StatusBadRequest, "depth must be between 1 and 5")
+			return
+		}
+		depth = parsed
+	}
+
+	withEmployees := r.URL.Query().Get("include_employees") != "false"
+
+	dept, err := h.service.GetByID(r.Context(), uint(id64), depth, withEmployees)
 	if err != nil {
 		if errors.Is(err, service.ErrDepartmentNotFound) {
 			respondWithError(w, http.StatusNotFound, err.Error())
@@ -128,5 +186,13 @@ func (h *DepartmentHandler) DeleteDepartment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Department deleted successfully"})
+	respondWithJSON(w, http.StatusOK, dept)
+}
+
+func validateName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 200 {
+		return "", errors.New("name must be between 1 and 200 characters")
+	}
+	return name, nil
 }

@@ -33,8 +33,18 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if strings.TrimSpace(input.FullName) == "" || strings.TrimSpace(input.Position) == "" || input.DepartmentID == 0 {
-		respondWithError(w, http.StatusBadRequest, "full_name, position, and department_id are required")
+	input.FullName = strings.TrimSpace(input.FullName)
+	input.Position = strings.TrimSpace(input.Position)
+	if input.FullName == "" || len(input.FullName) > 200 {
+		respondWithError(w, http.StatusBadRequest, "full_name must be between 1 and 200 characters")
+		return
+	}
+	if input.Position == "" || len(input.Position) > 200 {
+		respondWithError(w, http.StatusBadRequest, "position must be between 1 and 200 characters")
+		return
+	}
+	if input.DepartmentID == 0 {
+		respondWithError(w, http.StatusBadRequest, "department_id is required")
 		return
 	}
 
@@ -55,6 +65,52 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		respondWithError(w, http.StatusInternalServerError, "Internal server error: "+err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, emp)
+}
+
+func (h *EmployeeHandler) CreateEmployeeInDepartment(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id64, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid department ID")
+		return
+	}
+
+	var input struct {
+		FullName string  `json:"full_name"`
+		Position string  `json:"position"`
+		HiredAt  *string `json:"hired_at"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if strings.TrimSpace(input.FullName) == "" || strings.TrimSpace(input.Position) == "" {
+		respondWithError(w, http.StatusBadRequest, "full_name and position are required")
+		return
+	}
+
+	var hiredAtTime *time.Time
+	if input.HiredAt != nil && *input.HiredAt != "" {
+		parsedTime, err := time.Parse("2006-01-02", *input.HiredAt)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid date format. Use YYYY-MM-DD")
+			return
+		}
+		hiredAtTime = &parsedTime
+	}
+
+	emp, err := h.service.Create(r.Context(), uint(id64), input.FullName, input.Position, hiredAtTime)
+	if err != nil {
+		if errors.Is(err, service.ErrParentNotFound) {
+			respondWithError(w, http.StatusNotFound, "Department not found")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -92,8 +148,18 @@ func (h *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if strings.TrimSpace(input.FullName) == "" || strings.TrimSpace(input.Position) == "" || input.DepartmentID == 0 {
-		respondWithError(w, http.StatusBadRequest, "fields cannot be empty")
+	input.FullName = strings.TrimSpace(input.FullName)
+	input.Position = strings.TrimSpace(input.Position)
+	if input.FullName == "" || len(input.FullName) > 200 {
+		respondWithError(w, http.StatusBadRequest, "full_name must be between 1 and 200 characters")
+		return
+	}
+	if input.Position == "" || len(input.Position) > 200 {
+		respondWithError(w, http.StatusBadRequest, "position must be between 1 and 200 characters")
+		return
+	}
+	if input.DepartmentID == 0 {
+		respondWithError(w, http.StatusBadRequest, "department_id is required")
 		return
 	}
 

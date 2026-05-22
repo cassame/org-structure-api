@@ -29,6 +29,13 @@ func (r *DepartmentRepository) GetByID(ctx context.Context, id uint) (*model.Dep
 	return &dept, err
 }
 
+func (r *DepartmentRepository) ReassignEmployees(ctx context.Context, fromDeptID, toDeptID uint) error {
+	return r.db.WithContext(ctx).
+		Model(&model.Employee{}).
+		Where("department_id = ?", fromDeptID).
+		Update("department_id", toDeptID).Error
+}
+
 func (r *DepartmentRepository) Update(ctx context.Context, dept *model.Department) error {
 	return r.db.WithContext(ctx).Save(dept).Error
 }

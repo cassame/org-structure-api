@@ -10,6 +10,7 @@ import (
 type mockDepartmentRepository struct {
 	getByIDFunc func(ctx context.Context, id uint) (*model.Department, error)
 	updateFunc  func(ctx context.Context, dept *model.Department) error
+	getAllFunc  func(ctx context.Context) ([]model.Department, error)
 }
 
 func (m *mockDepartmentRepository) Create(ctx context.Context, dept *model.Department) error {
@@ -21,6 +22,10 @@ func (m *mockDepartmentRepository) GetByID(ctx context.Context, id uint) (*model
 		return m.getByIDFunc(ctx, id)
 	}
 	return nil, errors.New("not implemented")
+}
+
+func (m *mockDepartmentRepository) ReassignEmployees(ctx context.Context, fromDeptID, toDeptID uint) error {
+	return nil
 }
 
 func (m *mockDepartmentRepository) Update(ctx context.Context, dept *model.Department) error {
@@ -35,6 +40,9 @@ func (m *mockDepartmentRepository) Delete(ctx context.Context, id uint) error {
 }
 
 func (m *mockDepartmentRepository) GetAll(ctx context.Context) ([]model.Department, error) {
+	if m.getAllFunc != nil {
+		return m.getAllFunc(ctx)
+	}
 	return nil, nil
 }
 
@@ -51,6 +59,7 @@ func TestDepartmentService_Update(t *testing.T) {
 		newName       string
 		newParentID   *uint
 		mockGetByID   func(ctx context.Context, id uint) (*model.Department, error)
+		mockGetAll    func(ctx context.Context) ([]model.Department, error) // добавь
 		expectedError error
 	}{
 		{
@@ -83,11 +92,51 @@ func TestDepartmentService_Update(t *testing.T) {
 			},
 			expectedError: errors.New("department cannot be its own parent"),
 		},
+		{
+			name:        "Ошибка: Цикл через потомка (A→B→C, C пытается стать родителем A)",
+			deptID:      1,
+			newName:     "Root",
+			newParentID: uintPtr(3), // пытаемся сделать потомка C родителем A
+			mockGetByID: func(ctx context.Context, id uint) (*model.Department, error) {
+				return &model.Department{ID: 1, Name: "Root"}, nil
+			},
+			expectedError: ErrCycleDetected,
+		},
+		{
+			name:        "Успешное обновление со сменой родителя",
+			deptID:      2,
+			newName:     "Backend",
+			newParentID: uintPtr(3),
+			mockGetByID: func(ctx context.Context, id uint) (*model.Department, error) {
+				return &model.Department{ID: 2, Name: "Backend", ParentID: uintPtr(1)}, nil
+			},
+			expectedError: nil,
+		},
+		{
+			name:        "Ошибка: Цикл через потомка (C пытается стать родителем A)",
+			deptID:      1,
+			newName:     "Root",
+			newParentID: uintPtr(3),
+
+			mockGetByID: func(ctx context.Context, id uint) (*model.Department, error) {
+				return &model.Department{ID: 1, Name: "Root"}, nil
+			},
+			mockGetAll: func(ctx context.Context) ([]model.Department, error) {
+				two := uint(2)
+				return []model.Department{
+					{ID: 1, Name: "Root"},
+					{ID: 2, Name: "B", ParentID: uintPtr(1)},
+					{ID: 3, Name: "C", ParentID: &two},
+				}, nil
+			},
+			expectedError: ErrCycleDetected,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRepo := &mockDepartmentRepository{
 				getByIDFunc: tt.mockGetByID,
+				getAllFunc:  tt.mockGetAll,
 				updateFunc: func(ctx context.Context, dept *model.Department) error {
 					return nil
 				},
