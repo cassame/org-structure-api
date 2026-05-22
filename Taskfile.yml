@@ -1,0 +1,28 @@
+version: '3'
+
+tasks:
+  run:
+    desc: Локальный запуск HTTP-сервера (вне Docker)
+    cmds:
+      - go run cmd/api/main.go
+
+  up:
+    desc: Запуск всего окружения через docker-compose
+    cmds:
+      - docker-compose up --build
+
+  down:
+    desc: Остановка и удаление контейнеров docker-compose
+    cmds:
+      - docker-compose down -v
+
+  test:
+    desc: Запуск всех Unit-тестов в проекте
+    cmds:
+      - go test -v ./...
+
+  tidy:
+    desc: Очистка и форматирование зависимостей Go
+    cmds:
+      - go mod tidy
+      - go fmt ./...

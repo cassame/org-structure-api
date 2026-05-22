@@ -1,0 +1,11 @@
+package service
+
+import "errors"
+
+var (
+	ErrDepartmentNotFound = errors.New("department not found")
+	ErrCycleDetected      = errors.New("cyclical dependency detected: cannot set sub-department as parent")
+	ErrParentNotFound     = errors.New("parent department not found")
+
+	ErrEmployeeNotFound = errors.New("employee not found")
+)
